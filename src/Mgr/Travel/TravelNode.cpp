@@ -5,6 +5,7 @@
  */
 
 #include "TravelNode.h"
+#include "ChatHelper.h"
 #include "PlayerbotsDatabase.h"
 #include "BudgetValues.h"
 #include "PathGenerator.h"
@@ -1672,7 +1673,7 @@ void TravelNodeMap::generateStartNodes()
 
             WorldPosition pos(info->mapId, info->positionX, info->positionY, info->positionZ, info->orientation);
 
-            std::string const nodeName = startNames[i] + " start";
+            std::string const nodeName = (startNames.count(i) ? startNames[i] : ChatHelper::FormatRace(i)) + " start";
 
             TravelNodeMap::instance().addNode(pos, nodeName, true, true);
 

@@ -5,6 +5,7 @@
  */
 
 #include "PlayerbotFactory.h"
+#include "BotRaceTemplates.h"
 #include "PlayerbotsDatabase.h"
 #include "AccountMgr.h"
 #include "AiFactory.h"
@@ -32,6 +33,7 @@
 #include "PlayerbotSpellRepository.h"
 #include "Playerbots.h"
 #include "QuestDef.h"
+#include "RaceMgr.h"
 #include "RandomItemMgr.h"
 #include "RandomPlayerbotFactory.h"
 #include "ReputationMgr.h"
@@ -4107,7 +4109,7 @@ void PlayerbotFactory::InitMounts()
     std::map<uint8, std::map<uint32, std::vector<uint32>>> mounts;
     std::vector<uint32> slow, fast, fslow, ffast;
 
-    switch (bot->getRace())
+    switch (sRaceMgr->GetHomeRace(bot->getRace()))
     {
         case RACE_HUMAN:
             slow = {470, 6648, 458, 472};
@@ -4161,6 +4163,29 @@ void PlayerbotFactory::InitMounts()
                 fast = {23228, 23227, 23229};
             }
     }
+
+    // WHE: a race's own mounts replace its home race's, by speed. Spells the DBCs lack are skipped.
+    std::vector<uint32> raceSlow, raceFast;
+    for (uint32 spell : BotRaceTemplates::GetMounts(bot->getRace()))
+    {
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spell);
+        if (!spellInfo)
+            continue;
+
+        for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        {
+            if (spellInfo->Effects[i].ApplyAuraName != SPELL_AURA_MOD_INCREASE_MOUNTED_SPEED)
+                continue;
+
+            (spellInfo->Effects[i].CalcValue() >= 100 ? raceFast : raceSlow).push_back(spell);
+            break;
+        }
+    }
+
+    if (!raceSlow.empty())
+        slow = raceSlow;
+    if (!raceFast.empty())
+        fast = raceFast;
 
     switch (bot->GetTeamId())
     {

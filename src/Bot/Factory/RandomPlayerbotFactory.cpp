@@ -5,6 +5,7 @@
  */
 
 #include "RandomPlayerbotFactory.h"
+#include "BotRaceTemplates.h"
 #include "PlayerbotsDatabase.h"
 #include "AccountMgr.h"
 #include "ArenaTeamMgr.h"
@@ -138,7 +139,7 @@ Player* RandomPlayerbotFactory::CreateRandomBot(WorldSession* session, uint8 cls
 
     const uint8 race = raceOptions[urand(0, raceOptions.size() - 1)];
     const uint8 gender = urand(0, 1) ? GENDER_MALE : GENDER_FEMALE;
-    const auto raceAndGender = CombineRaceAndGender(race, gender);
+    const auto raceAndGender = CombineRaceAndGender(BotRaceTemplates::GetNameRace(race), gender);
 
     std::string name;
     if (!nameCache.empty())

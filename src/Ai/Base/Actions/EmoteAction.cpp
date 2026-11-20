@@ -7,7 +7,10 @@
 #include "EmoteAction.h"
 #include "Event.h"
 #include "Playerbots.h"
+#include "RaceMgr.h"
 #include "ServerFacade.h"
+
+#include <unordered_map>
 
 std::map<std::string, uint32> EmoteActionBase::emotes;
 std::map<std::string, uint32> EmoteActionBase::textEmotes;
@@ -875,6 +878,38 @@ uint32 TalkAction::GetRandomEmote(Unit* unit, bool textEmote)
 
 uint32 EmoteActionBase::GetNumberOfEmoteVariants(TextEmotes emote, uint8 Race, uint8 Gender)
 {
+    // WHE: Goblin (race 9) and Worgen (race 12) have their own emote sounds. Goblin females have as many variants as the
+    // males: { emote, { male, Worgen female } }
+    static std::unordered_map<uint32, std::pair<uint32, uint32>> const ownVariants = {
+        {304, {1, 1}},
+        {305, {5, 4}},
+        {306, {3, 3}},
+        {TEXT_EMOTE_HELLO, {4, 4}},
+        {324, {3, 3}},
+        {325, {2, 2}},
+        {326, {2, 2}},
+        {TEXT_EMOTE_CHEER, {2, 2}},
+        {TEXT_EMOTE_OPENFIRE, {2, 2}},
+        {TEXT_EMOTE_BYE, {4, 4}},
+        {TEXT_EMOTE_NOD, {6, 4}},
+        {TEXT_EMOTE_NO, {3, 3}},
+        {TEXT_EMOTE_THANK, {3, 3}},
+        {TEXT_EMOTE_FLIRT, {10, 9}},
+        {TEXT_EMOTE_JOKE, {10, 9}},
+    };
+
+    if (Race == 9 || Race == 12)
+    {
+        auto itr = ownVariants.find(emote);
+        if (itr == ownVariants.end())
+            return 1;
+
+        return Race == 9 || Gender == GENDER_MALE ? itr->second.first : itr->second.second;
+    }
+
+    // Other races use the variants of their kin
+    Race = sRaceMgr->GetKinRace(Race);
+
     if (emote == 304)
     {
         switch (Race)
