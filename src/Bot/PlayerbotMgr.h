@@ -38,6 +38,7 @@ public:
     void HandlePlayerBotLoginCallback(PlayerbotLoginQueryHolder const& holder, WorldSession* botSession);
 
     void LogoutPlayerBot(ObjectGuid guid);
+    Player* GetLivePlayerBot(ObjectGuid guid);   // Temucraft: nullptr when the player behind the pointer is gone
     void DisablePlayerBot(ObjectGuid guid);
     void RemoveFromPlayerbotsMap(ObjectGuid guid);
     Player* GetPlayerBot(ObjectGuid guid) const;

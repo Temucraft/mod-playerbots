@@ -335,10 +335,15 @@ void PlayerbotHolder::LogoutAllBots()
     }
     */
 
-    PlayerBotMap bots = playerBots;
-    for (auto& itr : bots)
+    // Temucraft: walk the guids and look each bot up again; a bot that a logout before it already took away (or
+    // whose player is gone) is skipped instead of being read from a stale pointer
+    std::vector<ObjectGuid> guids;
+    guids.reserve(playerBots.size());
+    for (auto const& itr : playerBots)
+        guids.push_back(itr.first);
+    for (ObjectGuid const& guid : guids)
     {
-        Player* bot = itr.second;
+        Player* bot = GetLivePlayerBot(guid);
         if (!bot)
             continue;
 
@@ -391,9 +396,25 @@ void PlayerbotMgr::CancelLogout()
     }
 }
 
+// Temucraft: the bot in the map, only when the server still knows that player. A pointer to a player that was
+// deleted without leaving the map is dropped (seen at shutdown: logout hooks read a freed bot).
+Player* PlayerbotHolder::GetLivePlayerBot(ObjectGuid guid)
+{
+    Player* bot = GetPlayerBot(guid);
+    if (!bot)
+        return nullptr;
+    if (ObjectAccessor::FindConnectedPlayer(guid) != bot)
+    {
+        LOG_ERROR("playerbots", "Bot {} is in the bot list but its player is gone; dropped from the list", guid.ToString());
+        RemoveFromPlayerbotsMap(guid);
+        return nullptr;
+    }
+    return bot;
+}
+
 void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
 {
-    if (Player* bot = GetPlayerBot(guid))
+    if (Player* bot = GetLivePlayerBot(guid))
     {
         PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
         if (!botAI)
