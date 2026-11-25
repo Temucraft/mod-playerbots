@@ -24,6 +24,7 @@
 #include "SpellAuras.h"
 #include "Util.h"
 #include "WorldPacket.h"
+#include <mutex>
 #include <stack>
 #include <unordered_set>
 
@@ -361,6 +362,7 @@ public:
 private:
     std::map<uint16, std::string> handlers;
     std::stack<WorldPacket> queue;
+    std::mutex queueLock;  // Temucraft: packets are added on the sender's map thread, handled on the bot's
 };
 
 class ChatCommandHolder
@@ -652,6 +654,9 @@ private:
     Item* FindItemInInventory(std::function<bool(ItemTemplate const*)> checkItem) const;
     void HandleCommands();
     void HandleCommand(uint32 type, std::string const& text, Player& fromPlayer, const uint32 lang = LANG_UNIVERSAL);
+    // Temucraft: HandleCommand body, run on the bot's own update for commands from other bots
+    void HandleCommandNow(uint32 type, std::string const text, Player* fromPlayer);
+    void HandlePendingCommands();
     inline bool IsValidUnit(Unit const* unit) const
     {
         return unit && unit->IsInWorld() && !unit->IsDuringRemoveFromWorld();
@@ -672,6 +677,17 @@ protected:
     ChatHelper chatHelper;
     std::list<ChatCommandHolder> chatCommands;
     std::list<ChatQueuedReply> chatReplies;
+    std::mutex chatRepliesLock;  // Temucraft: replies are queued on the speaker's map thread
+    // Temucraft: chat from another bot arrives on that bot's map thread (Player::Whisper runs the chat hooks
+    // there); it waits here for this bot's own update
+    struct PendingCommand
+    {
+        uint32 type;
+        std::string text;
+        ObjectGuid from;
+    };
+    std::vector<PendingCommand> pendingCommands;
+    std::mutex pendingCommandsLock;
     PacketHandlingHelper botOutgoingPacketHandlers;
     PacketHandlingHelper masterIncomingPacketHandlers;
     PacketHandlingHelper masterOutgoingPacketHandlers;

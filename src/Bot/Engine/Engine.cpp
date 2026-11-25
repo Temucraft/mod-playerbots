@@ -103,6 +103,7 @@ void Engine::Reset()
     }
 
     triggers.clear();
+    ++triggersVersion;  // Temucraft: the nodes are gone; see ProcessTriggers
 
     for (Multiplier* multiplier : multipliers)
     {
@@ -452,6 +453,7 @@ void Engine::ProcessTriggers(bool minimal)
 {
     std::unordered_map<Trigger*, Event> fires;
     uint32 now = getMSTime();
+    uint32 const version = triggersVersion;
     for (std::vector<TriggerNode*>::iterator i = triggers.begin(); i != triggers.end(); i++)
     {
         TriggerNode* node = *i;
@@ -481,6 +483,11 @@ void Engine::ProcessTriggers(bool minimal)
             Event event = trigger->Check();
             if (pmo)
                 pmo->finish();
+
+            // Temucraft: a check that changed this engine's strategies (Init -> Reset) deleted every node of
+            // triggers; the iterator and the cached Trigger* behind it are dangling, so stop this pass
+            if (triggersVersion != version)
+                return;
 
             if (!event)
                 continue;

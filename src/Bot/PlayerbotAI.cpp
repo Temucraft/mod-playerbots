@@ -97,10 +97,17 @@ void PacketHandlingHelper::AddHandler(uint16 opcode, std::string const handler) 
 
 void PacketHandlingHelper::Handle(ExternalEventHelper& helper)
 {
-    while (!queue.empty())
+    // Temucraft: take the queued packets under the lock; other map threads add to it while this bot updates
+    std::stack<WorldPacket> packets;
     {
-        WorldPacket packet = queue.top();
-        queue.pop(); // remove first so handling can't modify the queue while we're using it
+        std::lock_guard<std::mutex> guard(queueLock);
+        packets.swap(queue);
+    }
+
+    while (!packets.empty())
+    {
+        WorldPacket packet = packets.top();
+        packets.pop(); // remove first so handling can't modify the queue while we're using it
 
         helper.HandlePacket(handlers, packet);
     }
@@ -114,7 +121,10 @@ void PacketHandlingHelper::AddPacket(WorldPacket const& packet)
     // assert(packet);
     // assert(packet.GetOpcode());
     if (handlers.find(packet.GetOpcode()) != handlers.end())
+    {
+        std::lock_guard<std::mutex> guard(queueLock);  // Temucraft: called on the sender's map thread
         queue.push(WorldPacket(packet));
+    }
 }
 
 PlayerbotAI::PlayerbotAI()
@@ -306,6 +316,8 @@ void PlayerbotAI::UpdateAI(uint32 elapsed, bool minimal)
 
         inCombat = false;
     }
+
+    HandlePendingCommands();  // Temucraft: chat other bots sent from their map threads
 
     bool doMinimalReaction = minimal || !AllowActivity(REACT_ACTIVITY);
     if (UpdateAIReaction(elapsed, doMinimalReaction, !bot->IsInFlight()))
@@ -571,18 +583,25 @@ void PlayerbotAI::UpdateAIInternal([[maybe_unused]] uint32 elapsed, bool minimal
     ExternalEventHelper helper(aiObjectContext);
 
     // chat replies
-    for (auto it = chatReplies.begin(); it != chatReplies.end();)
+    // Temucraft: take the due replies under the lock (they are queued on the speaker's map thread), reply outside it
+    std::list<ChatQueuedReply> dueReplies;
     {
-        time_t checkTime = it->m_time;
-        if (checkTime && time(0) < checkTime)
+        std::lock_guard<std::mutex> guard(chatRepliesLock);
+        for (auto it = chatReplies.begin(); it != chatReplies.end();)
         {
-            ++it;
-            continue;
-        }
+            time_t checkTime = it->m_time;
+            if (checkTime && time(0) < checkTime)
+            {
+                ++it;
+                continue;
+            }
 
-        ChatReplyAction::ChatReplyDo(bot, it->m_type, it->m_guid1, it->m_msg, it->m_chanName, it->m_name);
-        it = chatReplies.erase(it);
+            dueReplies.splice(dueReplies.end(), chatReplies, it++);
+        }
     }
+
+    for (ChatQueuedReply const& reply : dueReplies)
+        ChatReplyAction::ChatReplyDo(bot, reply.m_type, reply.m_guid1, reply.m_msg, reply.m_chanName, reply.m_name);
 
     HandleCommands();
 
@@ -1040,6 +1059,39 @@ bool PlayerbotAI::IsAllowedCommand(std::string const text)
 
 void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fromPlayer)
 {
+    // Temucraft: chat from another bot reaches us on that bot's map thread (Player::Whisper runs the chat hooks
+    // where the speaker is updated), while our own map thread may be in our engines. "reset", "do ..." and the
+    // command queue would then rebuild the engines or the list under it: Engine::Reset deletes the TriggerNodes
+    // that ProcessTriggers is walking. Keep such chat for our own update (HandlePendingCommands).
+    if (fromPlayer && fromPlayer != bot && GET_PLAYERBOT_AI(fromPlayer) && !IsSelfBot(fromPlayer))
+    {
+        std::lock_guard<std::mutex> guard(pendingCommandsLock);
+        if (pendingCommands.size() < 50)
+            pendingCommands.push_back({type, text, fromPlayer->GetGUID()});
+        return;
+    }
+
+    HandleCommandNow(type, text, fromPlayer);
+}
+
+// Temucraft: runs on the bot's own update, before its engines
+void PlayerbotAI::HandlePendingCommands()
+{
+    std::vector<PendingCommand> commands;
+    {
+        std::lock_guard<std::mutex> guard(pendingCommandsLock);
+        if (pendingCommands.empty())
+            return;
+        commands.swap(pendingCommands);
+    }
+
+    for (PendingCommand const& command : commands)
+        if (Player* fromPlayer = ObjectAccessor::FindConnectedPlayer(command.from))
+            HandleCommandNow(command.type, command.text, fromPlayer);
+}
+
+void PlayerbotAI::HandleCommandNow(uint32 type, std::string const text, Player* fromPlayer)
+{
     if (!GetSecurity()->CheckLevelFor(PLAYERBOT_SECURITY_INVITE, type != CHAT_MSG_WHISPER, fromPlayer))
         return;
 
@@ -1055,7 +1107,7 @@ void PlayerbotAI::HandleCommand(uint32 type, std::string const text, Player* fro
         split(commands, text, sPlayerbotAIConfig.CommandSeparator.c_str());
         for (std::vector<std::string>::iterator i = commands.begin(); i != commands.end(); ++i)
         {
-            HandleCommand(type, *i, fromPlayer);
+            HandleCommandNow(type, *i, fromPlayer);
         }
 
         return;
@@ -6285,7 +6337,11 @@ bool PlayerbotAI::IsInRealGuild()
     return PlayerbotGuildMgr::instance().IsRealGuild(bot->GetGuildId());
 }
 
-void PlayerbotAI::QueueChatResponse(const ChatQueuedReply chatReply) { chatReplies.push_back(std::move(chatReply)); }
+void PlayerbotAI::QueueChatResponse(const ChatQueuedReply chatReply)
+{
+    std::lock_guard<std::mutex> guard(chatRepliesLock);  // Temucraft: called on the speaker's map thread
+    chatReplies.push_back(std::move(chatReply));
+}
 
 bool PlayerbotAI::EqualLowercaseName(std::string s1, std::string s2)
 {

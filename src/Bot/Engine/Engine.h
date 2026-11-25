@@ -113,6 +113,9 @@ protected:
 
     Queue queue;
     std::vector<TriggerNode*> triggers;
+    // Temucraft: bumped by Reset(), which deletes every node of triggers; lets ProcessTriggers notice that a
+    // trigger check rebuilt the list it is walking
+    uint32 triggersVersion = 0;
     std::vector<Multiplier*> multipliers;
     AiObjectContext* aiObjectContext;
     std::map<std::string, Strategy*> strategies;
