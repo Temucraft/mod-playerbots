@@ -600,7 +600,7 @@ void PlayerbotAI::UpdateAIInternal([[maybe_unused]] uint32 elapsed, bool minimal
         }
     }
 
-    for (ChatQueuedReply const& reply : dueReplies)
+    for (ChatQueuedReply& reply : dueReplies)  // ChatReplyDo takes non-const references
         ChatReplyAction::ChatReplyDo(bot, reply.m_type, reply.m_guid1, reply.m_msg, reply.m_chanName, reply.m_name);
 
     HandleCommands();
