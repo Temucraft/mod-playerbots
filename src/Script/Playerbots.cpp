@@ -30,6 +30,7 @@
 #include "ServerScript.h"
 #include "SessionScript.h"
 #include "WorldScript.h"
+#include "WorldSessionMgr.h"
 #include "cmath"
 
 class PlayerbotsDatabaseScript : public DatabaseScript
@@ -553,6 +554,18 @@ public:
     // Runs before the sessions are kicked on server shutdown
     void OnShutdown() override
     {
+        // Temucraft: the real players are only saved when their sessions are kicked, after this; save them first so a
+        // crash while the bots log out (23:18 on live) doesn't lose their play since the last save
+        uint32 saved = 0;
+        for (auto const& [accountId, session] : sWorldSessionMgr->GetAllSessions())
+            if (Player* player = session ? session->GetPlayer() : nullptr)
+                if (player->IsInWorld())   // bot sessions aren't in this list
+                {
+                    player->SaveToDB(false, false);
+                    ++saved;
+                }
+        LOG_INFO("playerbots", "Saved {} players before the bots log out", saved);
+
         LOG_INFO("playerbots", "Logging out all bots...");
         sRandomPlayerbotMgr.LogoutAllBots();
         PlayerbotHolder::ClearPendingLogins();

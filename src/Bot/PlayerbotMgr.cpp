@@ -412,6 +412,44 @@ Player* PlayerbotHolder::GetLivePlayerBot(ObjectGuid guid)
     return bot;
 }
 
+// Temucraft: before a bot leaves the map, drop the players in its visibility lists that are no longer the server's
+// player for their guid. Leaving the map walks both lists and writes into every player in them, so a player deleted
+// without being taken out of them crashed the shutdown logout (live 23:18: Unit::RemoveFromWorld ->
+// DestroyForVisiblePlayers -> erase in the freed player's list). Only players are checked: a live player is always
+// the one ObjectAccessor knows for its guid, so nothing valid is dropped (dropping a live link would leave the other
+// side pointing at the deleted bot).
+static void DropStaleVisiblePlayers(Player* bot)
+{
+    ObjectVisibilityContainer& container = bot->GetObjectVisibilityContainer();
+
+    VisiblePlayersMap& seenBy = container.GetVisiblePlayersMap();
+    for (auto itr = seenBy.begin(); itr != seenBy.end();)
+    {
+        if (ObjectAccessor::FindConnectedPlayer(itr->first) != itr->second)
+        {
+            LOG_ERROR("playerbots", "Bot {} logging out: player {} in its seen-by list is gone; link dropped",
+                      bot->GetGUID().ToString(), itr->first.ToString());
+            itr = seenBy.erase(itr);
+        }
+        else
+            ++itr;
+    }
+
+    if (VisibleWorldObjectsMap* sees = container.GetVisibleWorldObjectsMap())
+        for (auto itr = sees->begin(); itr != sees->end();)
+        {
+            if (itr->first.IsPlayer() &&
+                static_cast<WorldObject*>(ObjectAccessor::FindConnectedPlayer(itr->first)) != itr->second)
+            {
+                LOG_ERROR("playerbots", "Bot {} logging out: player {} in its visible list is gone; link dropped",
+                          bot->GetGUID().ToString(), itr->first.ToString());
+                itr = sees->erase(itr);
+            }
+            else
+                ++itr;
+        }
+}
+
 void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
 {
     if (Player* bot = GetLivePlayerBot(guid))
@@ -470,6 +508,7 @@ void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
                 "goodbye", "Goodbye!", {});
             botAI->TellMaster(message);
             RemoveFromPlayerbotsMap(guid);              // deletes bot player ptr inside this WorldSession PlayerBotMap
+            DropStaleVisiblePlayers(bot);               // Temucraft: see above
             botWorldSessionPtr->LogoutPlayer(true);     // this will delete the bot Player object and PlayerbotAI object
             delete botWorldSessionPtr;                  // finally delete the bot's WorldSession
         }
